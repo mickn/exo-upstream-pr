@@ -61,15 +61,22 @@ export function createWindow(): BrowserWindow {
     }
   });
 
+  const createdWindow = mainWindow;
+  createdWindow.on("closed", () => {
+    if (mainWindow === createdWindow) {
+      mainWindow = null;
+    }
+  });
+
   // Intercept keyboard shortcuts before they reach the page.
-  mainWindow.webContents.on("before-input-event", (event, input) => {
+  createdWindow.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown") return;
 
     // Cmd/Ctrl+F → open find bar
     const isFindModifier = process.platform === "darwin" ? input.meta : input.control;
     if (input.key === "f" && isFindModifier) {
       event.preventDefault();
-      mainWindow?.webContents.send("find:open");
+      createdWindow.webContents.send("find:open");
       return;
     }
 
@@ -78,19 +85,19 @@ export function createWindow(): BrowserWindow {
     // input methods (e.g. CDP key injection).
   });
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  createdWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url);
     return { action: "deny" };
   });
 
   // HMR for renderer base on electron-vite cli
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
-    mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+    createdWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    createdWindow.loadFile(join(__dirname, "../renderer/index.html"));
   }
 
-  return mainWindow;
+  return createdWindow;
 }
 
 export function getMainWindow(): BrowserWindow | null {

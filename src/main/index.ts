@@ -485,7 +485,9 @@ app.whenReady().then(async () => {
 
   app.on("activate", function () {
     // On macOS re-create a window when dock icon is clicked and no windows are open
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      agentCoordinator.start(createWindow());
+    }
   });
 });
 

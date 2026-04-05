@@ -19,6 +19,7 @@ import { saveDraftAndSync } from "../services/gmail-draft-sync";
 import { DEFAULT_STYLE_PROMPT } from "../../shared/types";
 import { populatePrivateProviderConfig } from "./private-providers-main";
 import { createLogger } from "../services/logger";
+import { WindowRelay } from "./window-relay";
 
 const log = createLogger("agent-coordinator");
 
@@ -35,6 +36,7 @@ export class AgentCoordinator {
   private mainWindow: BrowserWindow | null = null;
   private started = false;
   private workerReady: Promise<void> | null = null;
+  private readonly windowRelay = new WindowRelay<BrowserWindow>();
 
   /** Installed provider paths for re-loading on worker respawn */
   private installedProviders = new Map<string, string>();
@@ -160,8 +162,9 @@ export class AgentCoordinator {
   } as const;
 
   start(mainWindow: BrowserWindow): void {
-    if (this.started) return;
     this.mainWindow = mainWindow;
+    this.windowRelay.attach(mainWindow);
+    if (this.started) return;
     this.started = true;
     // Worker is spawned lazily on first use via ensureWorker()
   }
@@ -351,7 +354,7 @@ export class AgentCoordinator {
     // Forward events from port1 to the renderer via IPC
     port1.on("message", (event) => {
       const agentEvent = event.data as ScopedAgentEvent;
-      this.mainWindow?.webContents.send("agent:event", {
+      this.sendToRenderer("agent:event", {
         taskId,
         event: agentEvent,
       });
@@ -569,7 +572,7 @@ export class AgentCoordinator {
         this.handleNetFetchRequest(msg.requestId, msg.url, msg.options);
         break;
       case "confirmation_request":
-        this.mainWindow?.webContents.send("agent:confirmation", {
+        this.sendToRenderer("agent:confirmation", {
           toolCallId: msg.toolCallId,
           toolName: msg.toolName,
           input: msg.input,
@@ -577,7 +580,7 @@ export class AgentCoordinator {
         });
         break;
       case "providers_list":
-        this.mainWindow?.webContents.send("agent:providers", {
+        this.sendToRenderer("agent:providers", {
           providers: msg.providers,
         });
         break;
@@ -663,7 +666,7 @@ export class AgentCoordinator {
         method === "saveDraft"
           ? (args[4] as { cc?: string[]; bcc?: string[] } | undefined)
           : { cc: args[3] as string[] | undefined, bcc: args[4] as string[] | undefined };
-      this.mainWindow?.webContents.send("agent:draft-saved", {
+      this.sendToRenderer("agent:draft-saved", {
         emailId,
         draft: {
           body: draftBody,
@@ -678,7 +681,7 @@ export class AgentCoordinator {
     if (method === "generateDraft" && result && typeof result === "object" && "body" in result) {
       const emailId = args[0] as string;
       const genResult = result as { body: string; cc?: string[]; bcc?: string[] };
-      this.mainWindow?.webContents.send("agent:draft-saved", {
+      this.sendToRenderer("agent:draft-saved", {
         emailId,
         draft: {
           body: genResult.body,
@@ -691,7 +694,7 @@ export class AgentCoordinator {
     }
     if (method === "saveLocalDraft" && args.length >= 1) {
       const draft = args[0] as Record<string, unknown>;
-      this.mainWindow?.webContents.send("agent:local-draft-saved", { draft });
+      this.sendToRenderer("agent:local-draft-saved", { draft });
     }
     // generateForward now saves via saveDraftAndSync (same as generateDraft) —
     // notify the renderer so the inline draft appears on the email
@@ -701,7 +704,7 @@ export class AgentCoordinator {
       const forwardCc = (args.length >= 5 ? args[4] : undefined) as string[] | undefined;
       const forwardBcc = (args.length >= 6 ? args[5] : undefined) as string[] | undefined;
       const genResult = result as { body: string };
-      this.mainWindow?.webContents.send("agent:draft-saved", {
+      this.sendToRenderer("agent:draft-saved", {
         emailId,
         draft: {
           body: genResult.body,
@@ -713,6 +716,12 @@ export class AgentCoordinator {
           ...(forwardBcc?.length ? { bcc: forwardBcc } : {}),
         },
       });
+    }
+  }
+
+  private sendToRenderer(channel: string, payload: unknown): void {
+    if (!this.windowRelay.sendAttached(channel, payload)) {
+      log.warn(`[AgentCoordinator] Skipped renderer send for ${channel} — window unavailable`);
     }
   }
 
